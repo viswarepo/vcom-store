@@ -1,0 +1,28 @@
+server:
+  port: 8083
+spring:
+  application:
+    name: store-service
+  threads:
+    virtual:
+      enabled: true
+    kafka:
+      bootstrap-servers: ${KAFKA_BOOTSTRAP:localhost:9092}
+      consumer:
+        group-id: store-service
+        auto-offset-reset: earliest
+        key-deserializer: org.apache.kafka.common.serialization.StringDeserializer
+        value-deserializer: org.apache.kafka.common.serialization.StringDeserializer
+  datasource:
+    url: jdbc:postgresql://${DB_HOST:localhost}:5432/vcom_store_db
+    username: ${DB_USER:vcom_store_user}
+    password: ${DB_PASSWORD:password}
+  jpa:
+    hibernate:
+      ddl-auto: update   # use Flyway migrations before production
+      show-sql: true
+    open-in-view: false
+eureka:
+  client:
+    service-url:
+      defaultZone: ${EUREKA_URL:http://localhost:8761/eureka}

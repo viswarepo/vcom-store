@@ -1,0 +1,123 @@
+name: vcom-store
+
+# Profiles
+#   infra : Postgres, Redis, Kafka, Kafka UI shipped with this project (skip them if you use your own)
+#   apps  : discovery, gateway and all services
+#
+# Everything in Docker:        docker compose --profile infra --profile apps up -d --build
+# Your own Postgres/Kafka/Redis:
+#   docker compose --env-file .env.local-infra --profile apps up -d --build
+x-app-env: &app-env
+  EUREKA_URL: http://discovery-server:8761/eureka
+  DB_HOST: ${DB_HOST:-postgres}
+  DB_USER: ${DB_USER:-shop}
+  DB_PASSWORD: ${DB_PASSWORD:-shop}
+  KAFKA_BOOTSTRAP: ${KAFKA_BOOTSTRAP:-kafka:19092}
+  REDIS_HOST: ${REDIS_HOST:-redis}
+  REDIS_PASSWORD: ${REDIS_PASSWORD:-}
+  JWT_SECRET: ${JWT_SECRET:-change-me-change-me-change-me-change-me-32b}
+  RAZORPAY_KEY_ID: ${RAZORPAY_KEY_ID:-}              # empty = development mock gateway
+  RAZORPAY_KEY_SECRET: ${RAZORPAY_KEY_SECRET:-}
+  RAZORPAY_WEBHOOK_SECRET: ${RAZORPAY_WEBHOOK_SECRET:-}
+  ADMIN_EMAIL: ${ADMIN_EMAIL:-owner@vcom-store.local}   # platform owner login (change!)
+  ADMIN_PASSWORD: ${ADMIN_PASSWORD:-ChangeMe-123}
+
+x-app: &app
+  profiles: [apps]
+  restart: on-failure            # services retry until Postgres/Kafka are reachable
+  extra_hosts:
+    - "host.docker.internal:host-gateway"   # lets containers reach services on your machine
+  environment: *app-env
+  depends_on: [discovery-server]
+
+services:
+  # ---------------- bundled infrastructure (profile: infra) ----------------
+  postgres:
+    profiles: [infra]
+    image: postgres:16
+    environment:
+      POSTGRES_USER: shop
+      POSTGRES_PASSWORD: shop
+      POSTGRES_DB: postgres
+    ports: ["5432:5432"]
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+      - ./infra/init-db.sql:/docker-entrypoint-initdb.d/init.sql
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U shop"]
+      interval: 5s
+      retries: 10
+
+  redis:
+    profiles: [infra]
+    image: redis:7
+    ports: ["6379:6379"]
+
+  kafka:
+    profiles: [infra]
+    image: apache/kafka:3.8.0
+    ports: ["9092:9092"]
+    environment:
+      KAFKA_NODE_ID: 1
+      KAFKA_PROCESS_ROLES: broker,controller
+      KAFKA_LISTENERS: PLAINTEXT://:19092,PLAINTEXT_HOST://:9092,CONTROLLER://:9093
+      KAFKA_ADVERTISED_LISTENERS: PLAINTEXT://kafka:19092,PLAINTEXT_HOST://localhost:9092
+      KAFKA_LISTENER_SECURITY_PROTOCOL_MAP: CONTROLLER:PLAINTEXT,PLAINTEXT:PLAINTEXT,PLAINTEXT_HOST:PLAINTEXT
+      KAFKA_CONTROLLER_LISTENER_NAMES: CONTROLLER
+      KAFKA_CONTROLLER_QUORUM_VOTERS: 1@kafka:9093
+      KAFKA_INTER_BROKER_LISTENER_NAME: PLAINTEXT
+      KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: 1
+      KAFKA_TRANSACTION_STATE_LOG_REPLICATION_FACTOR: 1
+      KAFKA_TRANSACTION_STATE_LOG_MIN_ISR: 1
+
+  kafka-ui:
+    profiles: [infra]
+    image: provectuslabs/kafka-ui:latest
+    ports: ["8090:8080"]
+    environment:
+      KAFKA_CLUSTERS_0_NAME: local
+      KAFKA_CLUSTERS_0_BOOTSTRAPSERVERS: kafka:19092
+    depends_on: [kafka]
+
+  # ---------------- application (profile: apps) ----------------
+  discovery-server:
+    profiles: [apps]
+    restart: on-failure
+    build: { context: ., args: { MODULE: discovery-server } }
+    ports: ["8761:8761"]
+
+  api-gateway:
+    <<: *app
+    build: { context: ., args: { MODULE: api-gateway } }
+    ports: ["8080:8080"]
+
+  auth-service:
+    <<: *app
+    build: { context: ., args: { MODULE: auth-service } }
+
+  product-service:
+    <<: *app
+    build: { context: ., args: { MODULE: product-service } }
+
+  store-service:
+    <<: *app
+    build: { context: ., args: { MODULE: store-service } }
+
+  inventory-service:
+    <<: *app
+    build: { context: ., args: { MODULE: inventory-service } }
+
+  cart-service:
+    <<: *app
+    build: { context: ., args: { MODULE: cart-service } }
+
+  order-service:
+    <<: *app
+    build: { context: ., args: { MODULE: order-service } }
+
+  payment-service:
+    <<: *app
+    build: { context: ., args: { MODULE: payment-service } }
+
+volumes:
+  pgdata:
